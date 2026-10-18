@@ -27,10 +27,16 @@ Explicit administrative session/data deletion and deliberate storage cleanup are
 
 1. Record the current image digest, source revision, Compose configuration, session IDs and connection state. Preserve the site's existing overrides and secrets outside Git.
 2. Create consistent SQLite backups using SQLite's backup API (including `main.sqlite` and `openwa.sqlite`) and a protected copy of the media/session data volume. Confirm the copies can be opened; do not copy live SQLite database files alone while writes are active.
-3. Check out the preservation commit in a separate source directory. Build the fork's image. Merge the preservation overlay last and inspect only the resolved image and preservation settings; never publish full resolved environment output.
+3. Check out the preservation commit in a separate source directory. Build the fork's image. Merge the preservation overlay last and inspect only the resolved image and preservation settings; never publish full resolved environment output. `Dockerfile.preservation` also permits layering a freshly built `dist/` onto the exact deployed runtime digest without reinstalling/changing dependencies; use it only while the fork's package lock matches 0.23.7. This produces a locally tagged image, not a published registry image.
 
    ```sh
    docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.preservation.yml build openwa-api
+   ```
+
+   Runtime-preserving alternative after `npm ci` and `npm run build`:
+
+   ```sh
+   docker build -f Dockerfile.preservation -t openwa-preservation:local .
    ```
 
 4. Run focused tests and the build before replacing the container. Recreate only `openwa-api`, mounting the original named volume. Keep the rollback image locally and avoid pulling upstream over the custom image.
