@@ -8,6 +8,7 @@ jest.mock('archiver', () => ({ default: jest.fn() }));
 
 import { StorageService } from '../../common/storage/storage.service';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
+import { preserveRevokedMessage } from '../message/preserve-revoked-message';
 import { ChatMediaArchiveService, CHAT_MEDIA_PREFIX } from './chat-media-archive.service';
 
 /** A ConfigService stub that returns each call's default unless overridden by `overrides`. */
@@ -73,6 +74,30 @@ describe('ChatMediaArchiveService', () => {
   });
 
   describe('archive', () => {
+    it.each(['image', 'voice', 'audio', 'video', 'document', 'sticker'])(
+      'keeps archived %s bytes and captions retrievable after a sender deletion and TTL sweep',
+      async type => {
+        const row = await saveRow(
+          { mimetype: 'application/octet-stream', data: PNG.toString('base64') },
+          {
+            type,
+            body: 'original caption',
+          },
+        );
+        const service = enabled({ 'chatMedia.ttlDays': 0 });
+        await service.archive(row);
+        await preserveRevokedMessage(repository, row.sessionId, row.waMessageId);
+        await service.purgeExpired(Date.now() + 1000 * 60 * 60 * 24 * 365);
+
+        const media = await service.getMedia(row.sessionId, [row.chatId], row.waMessageId);
+        expect(media).not.toBeNull();
+        expect(await storageService.getFile(media!.path)).toEqual(PNG);
+        const reloaded = await repository.findOneByOrFail({ id: row.id });
+        expect(reloaded.body).toBe('original caption');
+        expect(reloaded.metadata).toMatchObject({ revocation: { originalType: type } });
+      },
+    );
+
     it('writes the blob and points the row at it, under the chat-media prefix', async () => {
       const row = await saveRow({ mimetype: 'image/png', data: PNG.toString('base64') });
 

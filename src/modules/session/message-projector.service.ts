@@ -5,6 +5,7 @@ import { Repository, In } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm';
 import { Session } from './entities/session.entity';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
+import { preserveRevokedMessage } from '../message/preserve-revoked-message';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { KeyedMutationQueue } from '../../common/utils/keyed-mutation-queue';
 import { SessionLidResolver } from './session-lid-resolver.service';
@@ -380,9 +381,12 @@ export class MessageProjector {
     const pending = waMessageId ? this.inboundInFlight.get(`${id}:${waMessageId}`) : undefined;
     if (!pending?.revoked && pending?.editedBody === undefined) return;
     this.enqueueMessageMutation(id, waMessageId, async () => {
-      const change = pending.revoked ? { body: '', type: 'revoked' } : { body: pending.editedBody };
       try {
-        await this.messageRepository.update({ sessionId: id, waMessageId }, change);
+        if (pending.revoked) {
+          await preserveRevokedMessage(this.messageRepository, id, waMessageId);
+        } else {
+          await this.messageRepository.update({ sessionId: id, waMessageId }, { body: pending.editedBody });
+        }
       } catch (err) {
         this.logger.error(`Failed to apply a revoke or edit to message ${waMessageId}`, String(err));
       }
@@ -648,11 +652,7 @@ export class MessageProjector {
     const revokedWaMessageId = message.revokedId ?? message.id;
     const inFlight = this.inboundInFlight.get(`${id}:${revokedWaMessageId}`);
     if (inFlight) inFlight.revoked = true;
-    void this.messageRepository
-      .update({ sessionId: id, waMessageId: revokedWaMessageId }, { body: '', type: 'revoked' })
-      .catch(err => {
-        this.logger.error(`Failed to update revoked message: ${revokedWaMessageId}`, String(err));
-      });
+    void this.recordMessageRevoked(id, revokedWaMessageId);
 
     // Notify consumers regardless of whether the row existed: webhook (message.revoked
     // is a declared event) + the real-time dashboard stream.
@@ -688,6 +688,24 @@ export class MessageProjector {
   /** Stored-row update for a REST outbound edit, on the same mutation chain — see MessageMutationProjector. */
   recordOutboundMessageEdit(sessionId: string, messageId: string, body: string): Promise<void> {
     return this.mutationProjector.recordOutboundMessageEdit(sessionId, messageId, body);
+  }
+
+  /** Sender deletions and REST deletions share the edit/reaction queue and preserve all bytes. */
+  recordMessageRevoked(sessionId: string, messageId: string): Promise<void> {
+    if (!sessionId || !messageId) return Promise.resolve();
+    const pending = this.inboundInFlight.get(`${sessionId}:${messageId}`);
+    if (pending) pending.revoked = true;
+    return new Promise(resolve => {
+      this.enqueueMessageMutation(sessionId, messageId, async () => {
+        try {
+          await preserveRevokedMessage(this.messageRepository, sessionId, messageId);
+        } catch (err) {
+          this.logger.error(`Failed to preserve revoked message: ${messageId}`, String(err));
+        } finally {
+          resolve();
+        }
+      });
+    });
   }
 
   /**

@@ -210,6 +210,24 @@ describe('MessageProjector', () => {
   });
 
   describe('handleMessageRevoked', () => {
+    it('serializes the deletion with reactions and prevents a late edit from replacing the original', async () => {
+      const row = { type: 'voice', body: 'original caption', metadata: { media: { data: 'YWJj' } } };
+      messageRepository.findOne.mockImplementation(() => Promise.resolve(structuredClone(row)));
+      messageRepository.update.mockImplementation((_where: unknown, change: Partial<typeof row>) => {
+        Object.assign(row, structuredClone(change));
+        return Promise.resolve({ affected: 1 });
+      });
+      projector.applyReactionQueued('s1', { messageId: 'WA1', senderId: 'peer', reaction: '👍' } as never);
+      projector.handleMessageRevoked('s1', engine, { id: 'WA1' } as never);
+      projector.applyMessageEditQueued('s1', { messageId: 'WA1', body: 'late edit' } as never);
+      await projector.recordMessageRevoked('s1', 'WA1'); // also exercise a repeated event
+      expect(row).toMatchObject({
+        type: 'revoked',
+        body: 'original caption',
+        metadata: { media: { data: 'YWJj' }, reactions: { peer: '👍' }, revocation: { originalType: 'voice' } },
+      });
+    });
+
     it('still notifies consumers when flagging the stored row fails', async () => {
       // The row may not exist at all, so the DB write is best-effort — but the webhook and the
       // dashboard stream are the whole point of the event and must not be lost with it.
@@ -561,19 +579,20 @@ describe('MessageProjector (inbound projection)', () => {
         Object.assign(eventsGateway, { emitMessageEdited: jest.fn() });
       });
 
-      it('empties the row once it is written', async () => {
+      it('marks the row revoked without erasing its content once it is written', async () => {
         const engine = makeEngine();
         engines.set(SESSION_ID, engine);
         await received(engine);
 
         projector.handleMessageRevoked(SESSION_ID, engine, { id: 'wamid.1', body: '', type: 'revoked' } as never);
-        expect(messageRepository.update).toHaveBeenCalledWith(where, { body: '', type: 'revoked' });
+        await drain();
+        expect(messageRepository.update).toHaveBeenCalledWith(where, { type: 'revoked' });
         expect(webhookService.dispatch).toHaveBeenCalledWith(SESSION_ID, 'message.revoked', expect.anything());
         releaseHook();
         await drain();
 
         expect(messageRepository.insert).toHaveBeenCalledTimes(1);
-        expect(updatesAfterInsert()).toEqual([[where, { body: '', type: 'revoked' }]]);
+        expect(updatesAfterInsert()).toEqual([[where, { type: 'revoked' }]]);
       });
 
       it('writes the latest edit onto the row once it is written', async () => {
@@ -602,7 +621,7 @@ describe('MessageProjector (inbound projection)', () => {
         releaseHook();
         await drain();
 
-        expect(updatesAfterInsert()).toEqual([[where, { body: '', type: 'revoked' }]]);
+        expect(updatesAfterInsert()).toEqual([[where, { type: 'revoked' }]]);
       });
 
       it('changes nothing after the insert when no revoke or edit arrived', async () => {

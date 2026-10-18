@@ -1,0 +1,13 @@
+# Use only with a built image containing this fork's preservation changes.
+# Keeps the existing data volume. Never use `docker compose down -v` during cutover.
+services:
+  openwa-api:
+    image: ${OPENWA_PRESERVATION_IMAGE:-openwa-preservation:local}
+    environment:
+      CHAT_MEDIA_ARCHIVE_ENABLED: 'true'
+      CHAT_MEDIA_ARCHIVE_OUTBOUND: 'true'
+      CHAT_MEDIA_ARCHIVE_TTL_DAYS: '0'
+      CHAT_MEDIA_ARCHIVE_MAX_BYTES: '52428800'
+      MEDIA_DOWNLOAD_ENABLED: 'true'
+      MEDIA_DOWNLOAD_MAX_BYTES: '52428800'
+      STORE_EPHEMERAL_MESSAGES: 'true'

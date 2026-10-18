@@ -96,7 +96,12 @@ export class MessageMutationProjector {
   /** Persist an edit before notifying consumers, while still surfacing the occurrence if storage fails. */
   private async applyMessageEdit(id: string, message: EditedMessage): Promise<void> {
     try {
-      await this.messageRepository.update({ sessionId: id, waMessageId: message.messageId }, { body: message.body });
+      const row = message.messageId
+        ? await this.messageRepository.findOne({ where: { sessionId: id, waMessageId: message.messageId } })
+        : null;
+      if (message.messageId && row?.type !== 'revoked') {
+        await this.messageRepository.update({ sessionId: id, waMessageId: message.messageId }, { body: message.body });
+      }
     } catch (err) {
       this.logger.error(`Failed to update edited message: ${message.messageId}`, String(err));
     }
@@ -117,7 +122,11 @@ export class MessageMutationProjector {
     await new Promise<void>(resolve => {
       this.enqueueMessageMutation(sessionId, messageId, async () => {
         try {
-          await this.messageRepository.update({ sessionId, waMessageId: messageId }, { body });
+          if (!messageId) return;
+          const row = await this.messageRepository.findOne({ where: { sessionId, waMessageId: messageId } });
+          if (row?.type !== 'revoked') {
+            await this.messageRepository.update({ sessionId, waMessageId: messageId }, { body });
+          }
         } catch (err) {
           this.logger.warn(`Failed to update stored body of edited message ${messageId}`, { error: String(err) });
         } finally {
