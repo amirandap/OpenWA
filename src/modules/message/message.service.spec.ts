@@ -43,7 +43,7 @@ describe('MessageService', () => {
   let service: MessageService;
   let repository: jest.Mocked<Partial<Repository<Message>>>;
   let engines: EngineRegistry;
-  let messageProjector: { recordOutboundMessageEdit: jest.Mock };
+  let messageProjector: { recordOutboundMessageEdit: jest.Mock; recordMessageRevoked: jest.Mock };
   let hookManager: jest.Mocked<Partial<HookManager>>;
   let lidMappingStore: { findLidsForPhone: jest.Mock; findPhoneForLid: jest.Mock };
   let mockEngine: ReturnType<typeof createMockEngine>;
@@ -60,7 +60,10 @@ describe('MessageService', () => {
 
     mockEngine = createMockEngine();
 
-    messageProjector = { recordOutboundMessageEdit: jest.fn().mockResolvedValue(undefined) };
+    messageProjector = {
+      recordOutboundMessageEdit: jest.fn().mockResolvedValue(undefined),
+      recordMessageRevoked: jest.fn().mockResolvedValue(undefined),
+    };
 
     engines = new EngineRegistry();
     engines.set('sess-1', mockEngine as unknown as IWhatsAppEngine);
@@ -756,6 +759,7 @@ describe('MessageService', () => {
       });
 
       expect(mockEngine.deleteMessage).toHaveBeenCalledWith('test@c.us', 'wa-msg-1', true);
+      expect(messageProjector.recordMessageRevoked).toHaveBeenCalledWith('sess-1', 'wa-msg-1');
     });
 
     it('should pass forEveryone=false when specified', async () => {

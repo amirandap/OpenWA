@@ -542,13 +542,8 @@ export class MessageService implements PluginMessagePort {
     const engine = this.getEngine(sessionId);
     await engine.deleteMessage(dto.chatId, dto.messageId, dto.forEveryone ?? true);
 
-    // Flag the stored message as revoked. No localized display string is persisted here;
-    // the dashboard renders the localized "message deleted" text.
-    try {
-      await this.messageRepository.update({ sessionId, waMessageId: dto.messageId }, { body: '', type: 'revoked' });
-    } catch (err) {
-      this.logger.warn(`Failed to flag deleted message ${dto.messageId} as revoked`, { error: String(err) });
-    }
+    // Preserve the local original even when a REST caller deletes it on WhatsApp.
+    await this.messageProjector.recordMessageRevoked(sessionId, dto.messageId);
   }
 
   // ========== Edit Message ==========

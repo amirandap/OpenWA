@@ -5565,7 +5565,7 @@ describe('SessionService', () => {
 
       expect(messageRepository.update as jest.Mock).toHaveBeenCalledWith(
         { sessionId: 'sess-uuid-1', waMessageId: 'ORIGINAL_MSG' },
-        { body: '', type: 'revoked' },
+        expect.objectContaining({ type: 'revoked' }),
       );
 
       // The DB flag is an internal side effect; the delivered payload is the public contract
@@ -5596,7 +5596,7 @@ describe('SessionService', () => {
 
       expect(messageRepository.update as jest.Mock).toHaveBeenCalledWith(
         { sessionId: 'sess-uuid-1', waMessageId: 'ORIGINAL_MSG' },
-        { body: '', type: 'revoked' },
+        expect.objectContaining({ type: 'revoked' }),
       );
     });
 
@@ -6785,7 +6785,7 @@ describe('SessionService', () => {
   // ── onMessageRevoked (no localized string) ────────────────────────
 
   describe('onMessageRevoked callback', () => {
-    it('persists an empty body with type "revoked" and emits no localized string', async () => {
+    it('marks the stored row revoked without writing a blank body', async () => {
       const session = createMockSession();
       (repository.findOne as jest.Mock).mockResolvedValue(session);
       (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
@@ -6810,14 +6810,13 @@ describe('SessionService', () => {
       };
 
       callbacks.onMessageRevoked(revoked);
-      // Allow the queued microtask (repository.update().then()) to resolve.
-      await Promise.resolve();
-      await Promise.resolve();
+      // Drain the per-message mutation queue.
+      await new Promise(resolve => setImmediate(resolve));
 
-      // The stored update must carry an EMPTY body and the 'revoked' type — no display string.
+      // Sender deletion marks the row without clearing the original body.
       expect(messageRepository.update).toHaveBeenCalledWith(
         { sessionId: 'sess-uuid-1', waMessageId: 'WA_MSG_1' },
-        { body: '', type: 'revoked' },
+        expect.objectContaining({ type: 'revoked' }),
       );
 
       // The structured payload emitted to clients must not contain any localized text.

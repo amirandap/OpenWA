@@ -1,0 +1,5 @@
+**
+!dist/
+!dist/**
+!Dockerfile.preservation
+!Dockerfile.preservation.dockerignore
